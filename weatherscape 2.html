@@ -1,0 +1,2244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Weather · Painted</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,200;0,9..40,300;0,9..40,400;1,9..40,300&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #08080f;
+      font-family: 'DM Sans', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Loader ───────────────────────────────────────────────────────────── */
+    #loader {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: #08080f;
+      z-index: 300;
+      gap: 20px;
+      transition: opacity 0.5s ease;
+    }
+    #loader.fade-out { opacity: 0; pointer-events: none; }
+
+    /* Location pin loader — replaces the circle spinner */
+    .pin-loader {
+      position: relative;
+      width: 40px; height: 52px;
+    }
+    .pin-loader .pin-svg {
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 28px; height: 34px;
+      color: rgba(255,255,255,0.52);
+      animation: pin-float 1.7s ease-in-out infinite;
+    }
+    .pin-loader .pin-shadow {
+      position: absolute;
+      bottom: 0; left: 50%;
+      width: 14px; height: 5px;
+      background: rgba(255,255,255,0.18);
+      border-radius: 50%;
+      animation: pin-shadow-scale 1.7s ease-in-out infinite;
+    }
+    @keyframes pin-float {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50%       { transform: translateX(-50%) translateY(-11px); }
+    }
+    @keyframes pin-shadow-scale {
+      0%, 100% { transform: translateX(-50%) scaleX(1);   opacity: 0.38; }
+      50%       { transform: translateX(-50%) scaleX(0.45); opacity: 0.1; }
+    }
+
+    #loader-text {
+      color: rgba(255,255,255,0.3);
+      font-size: 12px; font-weight: 300;
+      letter-spacing: 0.1em;
+      text-align: center;
+      max-width: 200px;
+    }
+
+    /* ── App ──────────────────────────────────────────────────────────────── */
+    #app {
+      position: relative;
+      width: 100vw; height: 100vh;
+      display: none;
+    }
+
+    /* ── Painting — full bleed ────────────────────────────────────────────── */
+    #painting-bg {
+      position: absolute; inset: 0;
+      background-size: cover;
+      background-position: center center;
+      opacity: 0;
+      transition: opacity 1.4s ease;
+      overflow: hidden;
+      will-change: transform;
+    }
+    #painting-bg.loaded { opacity: 1; }
+    #painting-bg.gradient-fallback { opacity: 1; }
+
+    /* Painting img — desktop: cover the viewport */
+    .painting-img {
+      width: 100%; height: 100%;
+      object-fit: cover; object-position: center;
+      display: block;
+    }
+
+    #overlay {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      transition: background 1s ease;
+    }
+
+    #transition-overlay {
+      position: absolute; inset: 0;
+      background: #08080f; z-index: 8;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.5s ease;
+    }
+    #transition-overlay.active { opacity: 1; }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       TOP BAR — full width, no panel offset
+    ═══════════════════════════════════════════════════════════════════════ */
+    #top-bar {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 20;
+      padding: 0 20px;
+      padding-top: env(safe-area-inset-top, 0px);
+      background: linear-gradient(to bottom, rgba(0,0,0,0.36) 0%, transparent 100%);
+    }
+
+    #location-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .loc-pin { flex-shrink: 0; opacity: 0.6; }
+    .chevron-icon { opacity: 0.4; flex-shrink: 0; transition: opacity 0.18s; }
+    #location-btn:hover .chevron-icon { opacity: 0.7; }
+
+    #top-bar-right {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 0;
+    }
+    #time-group {
+      display: flex; flex-direction: column;
+      align-items: flex-end; gap: 1px;
+    }
+    #time-row {
+      display: flex; align-items: center;
+      gap: 5px;
+    }
+    #time-icon {
+      display: flex; align-items: center;
+      color: rgba(255,255,255,0.45);
+    }
+    #time-display {
+      font-size: 18px; font-weight: 200;
+      letter-spacing: 0.02em;
+      color: rgba(255,255,255,0.9);
+      font-variant-numeric: tabular-nums;
+    }
+    #date-display {
+      font-size: 10px; font-weight: 300;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: rgba(255,255,255,0.38);
+    }
+
+    /* ── Sound toggle button ─────────────────────────────────────────────── */
+    #sound-btn {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 100px;
+      color: rgba(255,255,255,0.6);
+      cursor: pointer;
+      padding: 0;
+      margin-right: 20px;
+      flex-shrink: 0;
+      transition: background 0.18s, border-color 0.18s, color 0.18s, opacity 0.18s;
+    }
+    #sound-btn:hover {
+      background: rgba(255,255,255,0.18);
+      border-color: rgba(255,255,255,0.22);
+      color: rgba(255,255,255,0.9);
+    }
+    #sound-btn .icon-sound-on  { display: none; }
+    #sound-btn .icon-sound-off { display: block; }
+    #sound-btn:not(.muted) .icon-sound-on  { display: block; }
+    #sound-btn:not(.muted) .icon-sound-off { display: none; }
+    @media (max-width: 639px) {
+      #sound-btn { width: 30px; height: 30px; margin-right: 8px; }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       MOBILE CENTER WEATHER — floating, no container
+    ═══════════════════════════════════════════════════════════════════════ */
+    #mobile-center {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -55%);
+      text-align: center;
+      z-index: 10;
+      pointer-events: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      transition: opacity 0.3s ease;
+    }
+    #mobile-center.updating { opacity: 0.15; }
+
+    #mob-emoji {
+      display: flex; align-items: center;
+      filter: drop-shadow(0 2px 16px rgba(0,0,0,0.6));
+      margin-bottom: 6px;
+    }
+    #mob-emoji svg { width: 38px; height: 38px; color: rgba(255,255,255,0.92); }
+    #mob-temp-display {
+      font-size: clamp(77px, 22vw, 105px);
+      font-weight: 200; line-height: 1;
+      letter-spacing: -0.04em;
+      color: #fff;
+      text-shadow: 0 2px 40px rgba(0,0,0,0.55), 0 0 80px rgba(0,0,0,0.2);
+      cursor: pointer;
+      pointer-events: all;
+      transition: opacity 0.2s;
+    }
+    #mob-temp-display:hover { opacity: 0.7; }
+    #mob-condition-display {
+      font-size: 10px; font-weight: 400;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: rgba(255,255,255,0.42);
+      text-shadow: 0 1px 10px rgba(0,0,0,0.8);
+      margin-top: 8px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       BOTTOM BAR — full width, seamless gradient
+    ═══════════════════════════════════════════════════════════════════════ */
+    #bottom-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 100px 28px 30px;
+      background: linear-gradient(
+        to top,
+        var(--bc, rgba(0,0,0,0.88)) 0%,
+        rgba(0,0,0,0.12) 65%,
+        transparent 100%
+      );
+      z-index: 15;
+      transition: opacity 0.3s ease;
+    }
+    #bottom-bar.updating { opacity: 0.2; }
+
+    /* Row: weather block (left) + share button (right, absolute on desktop) */
+    #bottom-weather-row {
+      margin-bottom: 14px;
+    }
+
+    /* Emoji + temperature block */
+    #bottom-weather {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    #bottom-emoji {
+      display: flex; align-items: center;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+    }
+    #bottom-emoji svg { width: 30px; height: 30px; color: rgba(255,255,255,0.9); }
+    #bottom-temp-display {
+      font-size: clamp(47px, 4.5vw, 67px);
+      font-weight: 200; line-height: 1;
+      letter-spacing: -0.03em;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    #bottom-temp-display:hover { opacity: 0.6; }
+
+    #bottom-condition-display {
+      font-size: 10px; font-weight: 400;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: rgba(255,255,255,0.38);
+      margin-top: 2px;
+    }
+
+    #poetic-line {
+      font-size: clamp(13px, 1.5vw, 15px);
+      font-weight: 300; font-style: italic;
+      color: rgba(255,255,255,0.82);
+      margin-bottom: 5px; line-height: 1.5;
+    }
+    #attribution-line {
+      font-size: clamp(10px, 1.1vw, 12px);
+      font-weight: 300;
+      color: rgba(255,255,255,0.32);
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #attribution-line em {
+      font-style: normal;
+      color: rgba(255,255,255,0.5);
+      font-weight: 400;
+    }
+    /* ═══════════════════════════════════════════════════════════════════════
+       SHARE BUTTON — bottom-right, same position as old shuffle
+    ═══════════════════════════════════════════════════════════════════════ */
+    #bottom-bar #share-btn {
+      position: absolute;
+      bottom: 30px; right: 24px;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 50%;
+      color: rgba(255,255,255,0.7);
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.18s, color 0.18s, border-color 0.18s;
+    }
+    #bottom-bar #share-btn:hover {
+      background: rgba(255,255,255,0.18);
+      border-color: rgba(255,255,255,0.26);
+      color: #fff;
+    }
+    #bottom-bar #share-btn.sharing { opacity: 0.4; cursor: wait; pointer-events: none; }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       MOBILE
+    ═══════════════════════════════════════════════════════════════════════ */
+    @media (max-width: 639px) {
+      /* Both-axis scroll — scrollbars hidden */
+      html, body { overflow: auto; scrollbar-width: none; }
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar { display: none; }
+
+      /* App sizes to its content (the painting img drives the dimensions) */
+      #app { width: auto; min-width: 100vw; height: auto; min-height: 100vh; }
+
+      /* Painting container: let the img inside determine size */
+      #painting-bg {
+        position: absolute; top: 0; left: 0;
+        right: auto; bottom: auto;
+        width: auto; height: auto;
+        overflow: visible;
+      }
+
+      /* Painting img: scale to min-height 200vh, natural width (landscape
+         paintings become wider than viewport — scroll right to see the rest) */
+      .painting-img {
+        height: 200vh;
+        width: auto;
+        min-width: 100vw;
+        max-width: none;
+        object-fit: unset;
+      }
+
+      /* Overlay and transition: fixed so they cover the viewport only */
+      #overlay { position: fixed; inset: 0; height: 100vh; width: 100vw; }
+
+      /* Transition overlay stays viewport-sized */
+      #transition-overlay { position: fixed; }
+
+      /* Top bar: fixed so it stays visible while scrolling */
+      #top-bar {
+        position: fixed;
+        height: auto;
+        padding: calc(env(safe-area-inset-top, 0px) + 18px) 14px 14px;
+        gap: 16px;
+        background: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+      #time-display { font-size: 15px; }
+      #date-display { display: none; }
+
+      /* Hide centered floating weather — use bottom bar layout instead */
+      #mobile-center { display: none; }
+
+      /* Bottom bar: fixed at viewport bottom so weather info is always visible */
+      #bottom-bar {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        padding: 50px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+      }
+
+      /* Mobile: weather row is flex — share button aligns right with condition label */
+      #bottom-weather-row {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-end;
+        justify-content: space-between;
+      }
+      #bottom-bar #share-btn {
+        position: static;
+        width: 36px; height: 36px;
+        flex-shrink: 0;
+      }
+      #poetic-line { font-size: 13px; }
+      #attribution-line { font-size: 10px; white-space: normal; overflow: visible; text-overflow: clip; }
+    }
+
+    /* Extra small phones */
+    @media (max-width: 380px) {
+      #mob-temp-display { font-size: 69px; }
+      #mob-emoji svg { width: 30px; height: 30px; }
+    }
+
+    /* ── Drag hint — mobile only ────────────────────────────────────────── */
+    #drag-hint {
+      display: none;
+    }
+    @keyframes hint-fade {
+      0%   { opacity: 0; transform: translate(-50%, -46%); }
+      12%  { opacity: 1; transform: translate(-50%, -50%); }
+      72%  { opacity: 1; transform: translate(-50%, -50%); }
+      100% { opacity: 0; transform: translate(-50%, -56%); }
+    }
+    @media (max-width: 639px) {
+      #drag-hint {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: fixed;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 25;
+        color: rgba(255,255,255,0.88);
+        pointer-events: none;
+        opacity: 0;
+        text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+      }
+      #drag-hint span {
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.7);
+      }
+      #drag-hint.visible {
+        animation: hint-fade 5.5s ease forwards;
+      }
+    }
+
+    /* ── Inline location search — morphs in place ────────────────────────── */
+    #location-widget {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    /* Shared pill appearance for both states */
+    #location-btn,
+    #location-search {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 100px;
+      padding: 7px 10px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px; font-weight: 300;
+      color: rgba(255,255,255,0.85);
+      letter-spacing: 0.02em;
+    }
+
+    /* Button: overrides reset from above */
+    #location-btn {
+      cursor: pointer;
+      max-width: min(280px, 50vw);
+      transition: background 0.18s, border-color 0.18s, opacity 0.16s ease, transform 0.16s ease;
+    }
+    #location-btn:hover {
+      background: rgba(255,255,255,0.16);
+      border-color: rgba(255,255,255,0.22);
+      color: #fff;
+    }
+    #location-btn.morphed {
+      opacity: 0; pointer-events: none; transform: scale(0.94);
+    }
+
+    /* Search pill: sits absolutely on top of button, morphs in */
+    #location-search {
+      position: absolute;
+      top: 0; left: 0;
+      width: min(300px, 65vw);
+      border-color: rgba(255,255,255,0.22);
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(0.94);
+      transition: opacity 0.16s ease, transform 0.16s ease, border-color 0.16s;
+    }
+    #location-search.open {
+      opacity: 1; pointer-events: all; transform: scale(1);
+    }
+
+    .loc-search-icon { flex-shrink: 0; opacity: 0.45; }
+
+    #search-input {
+      flex: 1; min-width: 0;
+      background: none; border: none; outline: none;
+      color: #fff;
+      font-size: 12px; font-family: 'DM Sans', sans-serif;
+      font-weight: 300; letter-spacing: 0.02em;
+    }
+    #search-input::placeholder { color: rgba(255,255,255,0.25); }
+
+    #search-close-btn {
+      background: none; border: none; padding: 0;
+      color: rgba(255,255,255,0.35);
+      cursor: pointer; flex-shrink: 0;
+      display: flex; align-items: center;
+      transition: color 0.15s;
+    }
+    #search-close-btn:hover { color: rgba(255,255,255,0.8); }
+
+    /* Dropdown results */
+    #search-results-list {
+      position: absolute;
+      top: calc(100% + 7px);
+      left: 0;
+      min-width: min(300px, calc(100vw - 28px));
+      list-style: none;
+      background: rgba(8,8,18,0.97);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      overflow: hidden;
+      max-height: min(300px, 50vh);
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.08) transparent;
+      overscroll-behavior: contain;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+      z-index: 100;
+    }
+    #search-results-list:empty { display: none; }
+    #search-results-list::-webkit-scrollbar { width: 3px; }
+    #search-results-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
+
+    #search-results-list li {
+      display: flex; align-items: center;
+      gap: 0; padding: 11px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      transition: background 0.12s;
+      min-height: 44px;
+    }
+    #search-results-list li:last-child { border-bottom: none; }
+    #search-results-list li:hover,
+    #search-results-list li.kb-active { background: rgba(255,255,255,0.05); }
+    #search-results-list li:active { background: rgba(255,255,255,0.09); }
+
+    .result-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .result-city {
+      font-size: 12px; font-weight: 300;
+      color: rgba(255,255,255,0.82);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      letter-spacing: 0.02em;
+    }
+    .result-region {
+      font-size: 10px; font-weight: 300;
+      color: rgba(255,255,255,0.3);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    #search-empty {
+      padding: 28px 16px; text-align: center;
+      color: rgba(255,255,255,0.22);
+      font-size: 11px; font-weight: 300; letter-spacing: 0.04em;
+    }
+    #search-empty span { display: block; font-size: 20px; margin-bottom: 8px; opacity: 0.4; }
+
+    /* ── Error ────────────────────────────────────────────────────────────── */
+    #error-panel {
+      position: fixed; inset: 0;
+      display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      background: #08080f; z-index: 200;
+      gap: 12px; padding: 40px; text-align: center;
+    }
+    #error-panel.visible { display: flex; }
+    #error-icon { font-size: 36px; margin-bottom: 4px; opacity: 0.7; }
+    #error-title { font-size: 17px; font-weight: 300; color: rgba(255,255,255,0.8); }
+    #error-message { font-size: 13px; font-weight: 300; color: rgba(255,255,255,0.3); max-width: 320px; line-height: 1.7; }
+    #error-retry {
+      margin-top: 8px; padding: 9px 22px;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px; color: rgba(255,255,255,0.6);
+      font-size: 12px; font-weight: 300;
+      font-family: 'DM Sans', sans-serif; letter-spacing: 0.04em;
+      cursor: pointer; min-height: 44px;
+      transition: background 0.18s;
+    }
+    #error-retry:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.9); }
+
+    /* ── Fade-in ──────────────────────────────────────────────────────────── */
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    #top-bar, #bottom-bar {
+      opacity: 0;
+      animation: fadeIn 0.7s ease forwards;
+      animation-play-state: paused;
+    }
+    #app.revealed #top-bar    { animation-play-state: running; animation-delay: 0.25s; }
+    #app.revealed #bottom-bar { animation-play-state: running; animation-delay: 0.4s; }
+    #app.revealed #top-bar,
+    #app.revealed #bottom-bar { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div id="loader">
+    <div class="pin-loader">
+      <svg class="pin-svg" viewBox="0 0 24 28" fill="currentColor" stroke="none">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+        <circle cx="12" cy="9" r="2.5" fill="rgba(0,0,0,0.25)"/>
+      </svg>
+      <div class="pin-shadow"></div>
+    </div>
+    <p id="loader-text">locating you…</p>
+  </div>
+
+  <div id="error-panel">
+    <div id="error-icon">📍</div>
+    <h2 id="error-title">location access needed</h2>
+    <p id="error-message">allow location in your browser so we can fetch the weather and find a painting for your moment.</p>
+    <button id="error-retry" onclick="window.location.reload()">try again</button>
+  </div>
+
+  <div id="app">
+    <div id="painting-bg"></div>
+    <div id="overlay"></div>
+    <div id="transition-overlay"></div>
+    <div id="drag-hint" aria-hidden="true">
+      <span>Drag to explore</span>
+    </div>
+
+    <!-- Top bar: full width, no panel -->
+    <div id="top-bar">
+      <div id="location-widget">
+        <!-- Display state -->
+        <button id="location-btn" aria-label="Change location">
+          <svg class="loc-pin" width="11" height="13" viewBox="0 0 24 28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle cx="12" cy="9" r="2.5"/>
+          </svg>
+          <span id="location-label">locating…</span>
+          <svg class="chevron-icon" width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 1l4 4 4-4"/>
+          </svg>
+        </button>
+        <!-- Search state — morphs over the button -->
+        <div id="location-search" role="search" aria-label="Search city">
+          <svg class="loc-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input id="search-input" type="text" placeholder="search a city…" autocomplete="off" spellcheck="false" enterkeyhint="search" />
+          <button id="search-close-btn" aria-label="Close search">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <!-- Dropdown results -->
+        <ul id="search-results-list" role="listbox"></ul>
+      </div>
+      <div id="top-bar-right">
+        <button id="sound-btn" aria-label="Toggle ambient sound">
+          <svg class="icon-sound-on" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+          <svg class="icon-sound-off" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <line x1="23" y1="9" x2="17" y2="15"/>
+            <line x1="17" y1="9" x2="23" y2="15"/>
+          </svg>
+        </button>
+        <div id="time-group">
+          <div id="time-row">
+            <span id="time-icon" aria-hidden="true"></span>
+            <span id="time-display">--:-- --</span>
+          </div>
+          <span id="date-display">---</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile center: floating temp over painting, no container -->
+    <div id="mobile-center" aria-hidden="true">
+      <span id="mob-emoji"></span>
+      <span id="mob-temp-display">--°</span>
+      <span id="mob-condition-display">loading</span>
+    </div>
+
+    <!-- Bottom bar: weather row + text, share button bottom-right -->
+    <div id="bottom-bar">
+      <div id="bottom-weather-row">
+        <div id="bottom-weather">
+          <span id="bottom-emoji"></span>
+          <span id="bottom-temp-display">--°</span>
+          <span id="bottom-condition-display">loading</span>
+        </div>
+        <button id="share-btn" aria-label="Share this painting">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+          </svg>
+        </button>
+      </div>
+      <p id="poetic-line">&nbsp;</p>
+      <p id="attribution-line">&nbsp;</p>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    const state = {
+      lat: null, lon: null,
+      cityName: '', countryName: '',
+      temperatureC: null,
+      useFahrenheit: false,
+      condition: null,
+      timeSlot: null,
+      tempRange: null,
+      currentContext: null,
+      currentSearchTerms: [],
+      timezone: null,
+      clockInterval: null,
+      soundEnabled: true,
+      currentPainting: null,
+    };
+
+    const TIME_ICONS = {
+      dawn:      `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/></svg>`,
+      morning:   `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`,
+      afternoon: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`,
+      dusk:      `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10V2"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4 4-4-4"/><path d="M16 18a4 4 0 0 0-8 0"/></svg>`,
+      evening:   `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
+      night:     `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
+    };
+
+    /* Lucide weather icons — inline SVG, sized via CSS */
+    const W = `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+    const WEATHER_ICONS = {
+      sunny:  `<svg ${W}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`,
+      cloudy: `<svg ${W}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`,
+      foggy:  `<svg ${W}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 17H7"/><path d="M17 21H9"/></svg>`,
+      rainy:  `<svg ${W}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6M8 14v6M12 16v6"/></svg>`,
+      snowy:  `<svg ${W}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M8 15h.01M8 19h.01M12 17h.01M12 21h.01M16 15h.01M16 19h.01"/></svg>`,
+      stormy: `<svg ${W}><path d="M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973"/><path d="m13 12-3 5h4l-3 5"/></svg>`,
+    };
+
+    const CONDITIONS = {
+      sunny: {
+        key: 'sunny', label: 'clear sky', emoji: WEATHER_ICONS.sunny,
+        searchTerms: ['golden sunlight landscape', 'sunny day landscape', 'harvest sunshine'],
+        overlay: 'linear-gradient(160deg, rgba(255,185,20,0.18) 0%, rgba(255,130,0,0.08) 100%)',
+        fallbackGradient: 'linear-gradient(160deg, #8b6200 0%, #c8820a 40%, #e8b030 100%)',
+        bottomColor: 'rgba(70,38,0,0.92)',
+        poeticLine: 'The sun reigns supreme, pouring gold across every horizon.',
+      },
+      cloudy: {
+        key: 'cloudy', label: 'cloudy', emoji: WEATHER_ICONS.cloudy,
+        searchTerms: ['cloudy sky landscape', 'overcast day', 'grey clouds landscape'],
+        overlay: 'linear-gradient(160deg, rgba(130,145,165,0.22) 0%, rgba(90,105,130,0.1) 100%)',
+        fallbackGradient: 'linear-gradient(160deg, #3a4550 0%, #5a6a78 50%, #8899a8 100%)',
+        bottomColor: 'rgba(10,14,22,0.92)',
+        poeticLine: 'Clouds drift like thoughts, softening the light of the day.',
+      },
+      foggy: {
+        key: 'foggy', label: 'foggy', emoji: WEATHER_ICONS.foggy,
+        searchTerms: ['morning mist fog landscape', 'misty harbour fog'],
+        overlay: 'linear-gradient(160deg, rgba(200,215,230,0.32) 0%, rgba(185,205,225,0.18) 100%)',
+        fallbackGradient: 'linear-gradient(160deg, #a8b8c8 0%, #c8d8e8 50%, #e2eef5 100%)',
+        bottomColor: 'rgba(20,32,44,0.9)',
+        poeticLine: 'The world disappears into a soft and silver silence.',
+      },
+      rainy: {
+        key: 'rainy', label: 'rainy', emoji: WEATHER_ICONS.rainy,
+        searchTerms: ['rain landscape', 'rainy street', 'rain countryside'],
+        overlay: 'linear-gradient(160deg, rgba(40,70,160,0.24) 0%, rgba(30,55,130,0.12) 100%)',
+        fallbackGradient: 'linear-gradient(160deg, #0e2040 0%, #1e3f6a 50%, #2e5a90 100%)',
+        bottomColor: 'rgba(4,10,30,0.94)',
+        poeticLine: 'Rain speaks in whispers against the glass and stone.',
+      },
+      snowy: {
+        key: 'snowy', label: 'snowy', emoji: WEATHER_ICONS.snowy,
+        searchTerms: ['winter snow landscape', 'snow village landscape', 'blizzard winter'],
+        overlay: 'linear-gradient(160deg, rgba(175,200,245,0.28) 0%, rgba(200,220,255,0.14) 100%)',
+        fallbackGradient: 'linear-gradient(160deg, #a8c0e0 0%, #c8dcf5 50%, #e8f0ff 100%)',
+        bottomColor: 'rgba(8,16,36,0.92)',
+        poeticLine: 'Snow falls like forgetting, quiet and absolute.',
+      },
+      stormy: {
+        key: 'stormy', label: 'stormy', emoji: WEATHER_ICONS.stormy,
+        searchTerms: ['stormy sea dramatic', 'lightning storm landscape', 'dramatic dark storm'],
+        overlay: 'linear-gradient(160deg, rgba(18,18,45,0.38) 0%, rgba(24,24,55,0.22) 100%)',
+        fallbackGradient: 'linear-gradient(160deg, #080810 0%, #141428 50%, #1e1e3e 100%)',
+        bottomColor: 'rgba(2,2,10,0.96)',
+        poeticLine: 'Thunder rolls through the dark like a distant kettle drum.',
+      },
+    };
+
+    const CONTEXT_DATA = {
+      sunny: {
+        // Dawn: warm pinks/oranges of early sunrise — Turner, Friedrich, Lorrain
+        dawn:      { searchTerms: ['sunrise dawn golden', 'Turner sunrise landscape', 'golden dawn pastoral', 'pink horizon sunrise landscape'], poeticLine: 'The first light breaks pale and golden over a sleeping world.' },
+        // Morning: bright direct light, shadows still long — Impressionist sunshine
+        morning:   { searchTerms: ['morning sunshine pastoral', 'sunlit countryside morning', 'bright morning light landscape', 'impressionist sunlit morning'], poeticLine: 'Morning sun lays long bright shadows across the open fields.' },
+        // Afternoon: full open sun, harvest warmth — Constable, Millet
+        afternoon: { searchTerms: ['harvest sunshine summer', 'summer afternoon sunlight pastoral', 'sunny golden landscape', 'noon sunshine countryside'], poeticLine: 'The sun reigns supreme, pouring gold across every horizon.' },
+        // Dusk: golden hour fire — Turner, Monet sunset series
+        dusk:      { searchTerms: ['sunset golden evening', 'golden hour river sunset', 'warm sunset pastoral landscape', 'Turner golden sunset'], poeticLine: 'The sky catches fire and the horizon holds all the warmth of the day.' },
+        // Evening: afterglow fading, calm skies
+        evening:   { searchTerms: ['twilight evening afterglow landscape', 'evening calm pastoral', 'quiet dusk afterglow sky', 'evening glow horizon'], poeticLine: 'The last warmth drains from the sky into a still and amber dusk.' },
+        // Night: clear dark sky, moonlight — Whistler nocturne, Rousseau night
+        night:     { searchTerms: ['nocturne moonlit landscape', 'moonlight night pastoral', 'starry night moonlight landscape', 'nocturne clear night'], poeticLine: 'Stars emerge one by one into the clear dark vault of the sky.' },
+      },
+      cloudy: {
+        // Dawn: grey diffuse light, cool palette
+        dawn:      { searchTerms: ['grey overcast dawn landscape', 'misty grey morning pastoral', 'cloudy dawn cold light', 'overcast pale morning landscape'], poeticLine: 'The morning comes hushed, wrapped in a blanket of soft grey.' },
+        // Morning: heavy grey sky, muted palette — Constable clouds
+        morning:   { searchTerms: ['overcast grey sky landscape', 'cloudy morning pastoral countryside', 'grey clouds landscape pastoral', 'heavy sky overcast morning'], poeticLine: 'Clouds drift like thoughts, softening the light of the day.' },
+        // Afternoon: flat grey diffuse — grey day pastoral
+        afternoon: { searchTerms: ['grey sky afternoon landscape', 'overcast grey pastoral countryside', 'cloudy afternoon grey sky', 'flat grey light landscape'], poeticLine: 'The sky is a canvas of grey, waiting for the sun to break through.' },
+        // Dusk: grey dimming light, no colour
+        dusk:      { searchTerms: ['grey overcast dusk landscape', 'cloudy evening grey horizon', 'dusk grey sky pastoral', 'heavy clouds evening landscape'], poeticLine: 'The evening settles heavy and soft, without colour or shadow.' },
+        // Evening: dark grey clouds, last dim light
+        evening:   { searchTerms: ['twilight grey clouds landscape', 'overcast evening dark sky', 'grey dusk pastoral twilight', 'heavy clouds evening dim'], poeticLine: 'Clouds gather without urgency as the last light fades.' },
+        // Night: dark overcast no stars — nocturne dark clouds
+        night:     { searchTerms: ['nocturne dark cloudy night', 'overcast dark night landscape', 'dark cloudy night pastoral', 'night dark clouds nocturne'], poeticLine: 'The clouds hide every star and the world lies perfectly still.' },
+      },
+      foggy: {
+        // Dawn: mist rising from rivers — Corot, Turner misty mornings
+        dawn:      { searchTerms: ['morning mist river dawn', 'Corot misty morning landscape', 'fog dawn river pastoral', 'morning mist impressionist dawn'], poeticLine: 'Mist rises from the earth and the world is born again, slowly.' },
+        // Morning: soft silver mist — Corot, Whistler
+        morning:   { searchTerms: ['misty morning landscape', 'morning fog impressionist pastoral', 'mist soft silver landscape', 'Corot morning mist pastoral'], poeticLine: 'The world disappears into a soft and silver silence.' },
+        // Afternoon: hazy diffuse, bleached palette
+        afternoon: { searchTerms: ['misty haze afternoon landscape', 'fog afternoon pastoral grey', 'haze diffuse light landscape', 'misty afternoon impressionist'], poeticLine: 'Everything is softened today, as if wrapped in gauze.' },
+        // Dusk: evening mist thickens — grey-blue palette
+        dusk:      { searchTerms: ['evening mist fog landscape', 'misty dusk river landscape', 'fog dusk grey blue pastoral', 'evening mist twilight landscape'], poeticLine: 'The fog thickens as the light fails, swallowing the last details.' },
+        // Evening: fog after dark, forms disappear
+        evening:   { searchTerms: ['misty evening nocturne landscape', 'fog evening dark pastoral', 'night fog river landscape', 'foggy evening Whistler nocturne'], poeticLine: 'Forms dissolve into the mist, leaving only mood behind.' },
+        // Night: dark fog harbour — Whistler nocturne Thames
+        night:     { searchTerms: ['nocturne fog dark harbour', 'Whistler nocturne dark mist', 'foggy dark night landscape', 'dark fog nocturne night'], poeticLine: 'The fog erases the night and leaves only silence in its place.' },
+      },
+      rainy: {
+        // Dawn: cold grey rainy morning breaking
+        dawn:      { searchTerms: ['rainy grey dawn landscape', 'storm morning grey pastoral', 'rain grey dawn cold landscape', 'wet grey morning dawn'], poeticLine: 'Rain was here before the sun, and the earth is still dark with it.' },
+        // Morning: grey rain, wet roads — impressionist rain morning
+        morning:   { searchTerms: ['rainy morning grey landscape', 'rain pastoral grey sky', 'wet grey morning landscape', 'rain impressionist grey morning'], poeticLine: 'Rain speaks in whispers against the glass and stone.' },
+        // Afternoon: steady dark rain — Constable rain clouds
+        afternoon: { searchTerms: ['rain dark afternoon landscape', 'dark rainy day pastoral', 'rain storm afternoon grey', 'rain dark clouds afternoon pastoral'], poeticLine: 'The afternoon rain falls steady and patient, without apology.' },
+        // Dusk: wet dark dusk — silver-grey palette
+        dusk:      { searchTerms: ['rainy dark dusk landscape', 'wet grey dusk pastoral', 'dark rain evening grey', 'rain dusk grey silver landscape'], poeticLine: 'Rain at dusk turns the last light into something silver and sad.' },
+        // Evening: dark wet evening — nocturne rain
+        evening:   { searchTerms: ['rain dark evening nocturne', 'wet dark evening landscape', 'rainy dark nocturne evening', 'night rain dark pastoral'], poeticLine: 'Rain fills the evening with the sound of things being washed clean.' },
+        // Night: dark rainy night — Whistler dark nocturne + rain
+        night:     { searchTerms: ['nocturne dark rainy night', 'dark night rain landscape', 'nocturne storm dark night', 'rainy dark night nocturne landscape'], poeticLine: 'The night rain falls without witness, faithful and unheard.' },
+      },
+      snowy: {
+        // Dawn: cold pink sunrise over snow — Friedrich, Monet snow
+        dawn:      { searchTerms: ['snow sunrise winter dawn', 'winter dawn snow landscape cold', 'snowy morning cold sunrise', 'winter sunrise snow pastoral'], poeticLine: 'Snow overnight has remade the world in clean and quiet white.' },
+        // Morning: snow-covered landscape, white palette
+        morning:   { searchTerms: ['winter snow landscape morning', 'snow white morning pastoral', 'snow scene winter countryside', 'snowy morning landscape white'], poeticLine: 'Snow falls like forgetting, quiet and absolute.' },
+        // Afternoon: grey-white snow, flat cold light
+        afternoon: { searchTerms: ['winter snow grey afternoon', 'blizzard grey snow landscape', 'snow grey winter afternoon', 'snow covered landscape grey'], poeticLine: 'The snow gives the afternoon a brightness that has no warmth in it.' },
+        // Dusk: blue-grey snow, cold violet palette
+        dusk:      { searchTerms: ['winter dusk blue snow', 'snow cold blue evening landscape', 'snowy dusk grey blue landscape', 'winter sunset snow blue'], poeticLine: 'Dusk turns the snow from white to a deep and mournful blue.' },
+        // Evening: snow in dark, village lights — Pissarro snow village
+        evening:   { searchTerms: ['snowy village evening winter', 'winter evening snow dark landscape', 'snow night village pastoral', 'Pissarro snow village evening'], poeticLine: 'The snow holds the last light long after the sun has gone.' },
+        // Night: moonlit snow — cold blue-white nocturne
+        night:     { searchTerms: ['moonlit snow nocturne winter', 'winter night moonlight snow', 'nocturne snow moonlit landscape', 'night snow moonlight cold'], poeticLine: 'Moonlight on snow makes the night almost as bright as day.' },
+      },
+      stormy: {
+        // Dawn: storm at sunrise, broken dark sky — Turner drama
+        dawn:      { searchTerms: ['storm dawn dramatic sky', 'tempest sunrise dark landscape', 'dramatic storm dawn seascape', 'dark storm breaking dawn'], poeticLine: 'The storm arrived in the night and left the dawn looking broken.' },
+        // Morning: morning tempest at sea — Turner, Géricault
+        morning:   { searchTerms: ['tempest sea dramatic morning', 'storm dramatic sky landscape', 'thunderstorm dark morning', 'Turner storm sea morning'], poeticLine: 'The morning sky tears open and the wind does not apologise.' },
+        // Afternoon: full dark storm, Turner-style drama
+        afternoon: { searchTerms: ['dramatic storm seascape', 'tempest dark dramatic sea', 'thunderstorm landscape dark', 'storm dramatic Turner sea'], poeticLine: 'Thunder rolls through the dark like a distant kettle drum.' },
+        // Dusk: storm + sunset, dramatic red-black sky
+        dusk:      { searchTerms: ['storm dark sunset dramatic', 'tempest dramatic sunset', 'dark storm dusk sea', 'dramatic dark storm evening landscape'], poeticLine: 'The storm and the sunset wrestle for the sky and both lose.' },
+        // Evening: dark storm, wind, threatening sky
+        evening:   { searchTerms: ['dark storm evening nocturne', 'tempest dark evening sea', 'dramatic storm dark evening', 'dark turbulent storm evening'], poeticLine: 'The storm intensifies as night falls, shaking the deep foundations.' },
+        // Night: nocturne storm — El Greco dark, Whistler storm
+        night:     { searchTerms: ['nocturne dark storm night', 'dark dramatic night storm', 'tempest night dark sea', 'dark stormy night landscape nocturne'], poeticLine: 'Lightning splits the sky and for a moment everything is visible.' },
+      },
+    };
+
+    const TEMP_MODIFIERS = {
+      freezing: ['frozen river', 'ice landscape', 'arctic frost'],
+      cold:     ['cold winter', 'grey bleak landscape'],
+      mild:     [],
+      warm:     ['warm summer pastoral', 'lush summer landscape'],
+      hot:      ['blazing summer heat', 'scorched summer landscape'],
+    };
+
+    const TIME_OVERLAYS = {
+      dawn:      'linear-gradient(180deg, rgba(255,160,100,0.24) 0%, rgba(200,100,180,0.14) 100%)',
+      morning:   'linear-gradient(180deg, rgba(255,230,160,0.13) 0%, rgba(255,255,255,0.04) 100%)',
+      afternoon: 'linear-gradient(180deg, rgba(255,255,200,0.08) 0%, rgba(255,255,255,0.02) 100%)',
+      dusk:      'linear-gradient(180deg, rgba(255,120,30,0.36) 0%, rgba(200,60,10,0.20) 100%)',
+      evening:   'linear-gradient(180deg, rgba(60,40,100,0.30) 0%, rgba(20,10,50,0.24) 100%)',
+      night:     'linear-gradient(180deg, rgba(10,10,40,0.48) 0%, rgba(5,5,30,0.36) 100%)',
+    };
+
+    const WMO_LABELS = {
+      0: 'clear sky',
+      1: 'mainly clear', 2: 'partly cloudy', 3: 'overcast',
+      45: 'fog', 48: 'freezing fog',
+      51: 'light drizzle', 53: 'moderate drizzle', 55: 'heavy drizzle',
+      61: 'light rain', 63: 'moderate rain', 65: 'heavy rain',
+      66: 'freezing rain', 67: 'heavy freezing rain',
+      71: 'light snow', 73: 'moderate snow', 75: 'heavy snow', 77: 'snow grains',
+      80: 'light showers', 81: 'moderate showers', 82: 'violent showers',
+      85: 'light snow showers', 86: 'heavy snow showers',
+      95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'heavy thunderstorm',
+    };
+
+    /* ── Ambient Sound Engine (Web Audio API, no external files) ────────── */
+    const soundEngine = (() => {
+      let ctx = null, masterGain = null;
+      let activeNodes = [], activeTimers = [];
+      let currentKey = null, crossfading = false;
+      let stopTimer = null;
+
+      function getCtx() {
+        if (!ctx) {
+          ctx = new (window.AudioContext || window.webkitAudioContext)();
+          masterGain = ctx.createGain();
+          masterGain.gain.value = 0;
+          masterGain.connect(ctx.destination);
+        }
+        return ctx;
+      }
+
+      function makeNoiseBuffer(type) {
+        const len = ctx.sampleRate * 2;
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        if (type === 'white') {
+          for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        } else if (type === 'pink') {
+          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+          for (let i = 0; i < len; i++) {
+            const w = Math.random() * 2 - 1;
+            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
+            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
+            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
+            d[i] = Math.max(-1, Math.min(1, (b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11));
+            b6 = w * 0.115926;
+          }
+        } else {
+          let last = 0;
+          for (let i = 0; i < len; i++) {
+            last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+            d[i] = Math.max(-1, Math.min(1, last * 3.5));
+          }
+        }
+        return buf;
+      }
+
+      function noise(type) {
+        const s = ctx.createBufferSource();
+        s.buffer = makeNoiseBuffer(type);
+        s.loop = true; s.start();
+        activeNodes.push(s);
+        return s;
+      }
+
+      function filter(type, freq, Q) {
+        const f = ctx.createBiquadFilter();
+        f.type = type; f.frequency.value = freq;
+        if (Q != null) f.Q.value = Q;
+        return f;
+      }
+
+      function gain(v) { const g = ctx.createGain(); g.gain.value = v; return g; }
+
+      function buildSunny() {
+        const src = noise('pink'), hp = filter('highpass', 3000), g = gain(0.4);
+        const lfo = ctx.createOscillator(); lfo.frequency.value = 0.3; lfo.start();
+        const lg = gain(0.15);
+        activeNodes.push(lfo);
+        lfo.connect(lg); lg.connect(g.gain);
+        src.connect(hp); hp.connect(g); g.connect(masterGain);
+        function chirp() {
+          const osc = ctx.createOscillator(), env = gain(0);
+          const f0 = 1100 + Math.random() * 600;
+          osc.frequency.value = f0; osc.type = 'sine';
+          osc.connect(env); env.connect(masterGain);
+          const t = ctx.currentTime;
+          env.gain.setValueAtTime(0, t);
+          env.gain.linearRampToValueAtTime(0.1, t + 0.02);
+          osc.frequency.exponentialRampToValueAtTime(f0 + 400 + Math.random()*500, t + 0.09);
+          env.gain.linearRampToValueAtTime(0, t + 0.13);
+          osc.start(t); osc.stop(t + 0.15);
+        }
+        chirp();
+        activeTimers.push(setInterval(chirp, 2800 + Math.random() * 2200));
+      }
+
+      function buildCloudy() {
+        const src = noise('pink'), lp = filter('lowpass', 400, 0.8), g = gain(0.35);
+        src.connect(lp); lp.connect(g); g.connect(masterGain);
+      }
+
+      function buildFoggy() {
+        const src = noise('brown'), lp = filter('lowpass', 200, 3.5), g = gain(0.25);
+        src.connect(lp); lp.connect(g); g.connect(masterGain);
+      }
+
+      function buildRainy() {
+        const src = noise('white'), bp = filter('bandpass', 1400, 0.9), g = gain(0.55);
+        src.connect(bp); bp.connect(g); g.connect(masterGain);
+      }
+
+      function buildSnowy() {
+        const src = noise('brown'), lp = filter('lowpass', 80, 0.5), g = gain(0.15);
+        src.connect(lp); lp.connect(g); g.connect(masterGain);
+      }
+
+      function buildStormy() {
+        const src = noise('white'), bp = filter('bandpass', 1400, 0.9), rg = gain(0.5);
+        src.connect(bp); bp.connect(rg); rg.connect(masterGain);
+        function rumble() {
+          const osc = ctx.createOscillator(), lp = filter('lowpass', 120), env = gain(0);
+          osc.frequency.value = 40 + Math.random() * 40; osc.type = 'sine';
+          osc.connect(lp); lp.connect(env); env.connect(masterGain);
+          const t = ctx.currentTime;
+          env.gain.setValueAtTime(0, t);
+          env.gain.linearRampToValueAtTime(0.7, t + 0.15);
+          env.gain.linearRampToValueAtTime(0, t + 0.95);
+          osc.start(t); osc.stop(t + 1.0);
+        }
+        activeTimers.push(setInterval(rumble, 5000 + Math.random() * 4000));
+      }
+
+      function stopAll() {
+        activeTimers.forEach(t => clearInterval(t)); activeTimers = [];
+        activeNodes.forEach(n => { try { n.stop(); } catch(_){} try { n.disconnect(); } catch(_){} });
+        activeNodes = [];
+      }
+
+      const builders = { sunny:buildSunny, cloudy:buildCloudy, foggy:buildFoggy,
+                         rainy:buildRainy, snowy:buildSnowy, stormy:buildStormy };
+
+      return {
+        play(key) {
+          getCtx();
+          ctx.resume(); // always attempt resume — needed after autoplay block
+          if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; } // cancel pending stopAll
+          if (currentKey === key) {
+            masterGain.gain.cancelScheduledValues(ctx.currentTime);
+            masterGain.gain.setValueAtTime(masterGain.gain.value, ctx.currentTime);
+            masterGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 1.5);
+            return;
+          }
+          stopAll(); currentKey = key;
+          (builders[key] || buildCloudy)();
+          masterGain.gain.cancelScheduledValues(ctx.currentTime);
+          masterGain.gain.setValueAtTime(0, ctx.currentTime);
+          masterGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 1.5);
+        },
+        stop() {
+          if (!ctx || !masterGain) return;
+          masterGain.gain.cancelScheduledValues(ctx.currentTime);
+          masterGain.gain.setValueAtTime(masterGain.gain.value, ctx.currentTime);
+          masterGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.5);
+          if (stopTimer) clearTimeout(stopTimer);
+          stopTimer = setTimeout(() => { stopAll(); stopTimer = null; }, 1600);
+          currentKey = null;
+        },
+        setCondition(key) {
+          if (key === currentKey || crossfading || !ctx) return;
+          crossfading = true;
+          masterGain.gain.cancelScheduledValues(ctx.currentTime);
+          masterGain.gain.setValueAtTime(masterGain.gain.value, ctx.currentTime);
+          masterGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.8);
+          setTimeout(() => {
+            stopAll(); currentKey = key;
+            (builders[key] || buildCloudy)();
+            masterGain.gain.setValueAtTime(0, ctx.currentTime);
+            masterGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 1.5);
+            crossfading = false;
+          }, 850);
+        },
+      };
+    })();
+
+    function resolveCondition(code) {
+      let base;
+      if (code === 0)                  base = CONDITIONS.sunny;
+      else if (code >= 1  && code <= 3)    base = CONDITIONS.cloudy;
+      else if (code === 45 || code === 48) base = CONDITIONS.foggy;
+      else if (code >= 51  && code <= 67)  base = CONDITIONS.rainy;
+      else if (code >= 71  && code <= 77)  base = CONDITIONS.snowy;
+      else if (code >= 80  && code <= 82)  base = CONDITIONS.rainy;
+      else if (code >= 85  && code <= 86)  base = CONDITIONS.snowy;
+      else if (code >= 95  && code <= 99)  base = CONDITIONS.stormy;
+      else                                  base = CONDITIONS.cloudy;
+      return { ...base, label: WMO_LABELS[code] || base.label };
+    }
+
+    function getLocalHour() {
+      const now = new Date();
+      if (state.timezone) {
+        const h = parseInt(now.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: state.timezone }), 10);
+        return h === 24 ? 0 : h;
+      }
+      return now.getHours();
+    }
+
+    function getTimeSlot(hour) {
+      if (hour >= 5  && hour < 7)  return 'dawn';
+      if (hour >= 7  && hour < 12) return 'morning';
+      if (hour >= 12 && hour < 17) return 'afternoon';
+      if (hour >= 17 && hour < 19) return 'dusk';
+      if (hour >= 19 && hour < 22) return 'evening';
+      return 'night';
+    }
+
+    function getTemperatureRange(celsius) {
+      if (celsius === null || celsius === undefined) return 'mild';
+      if (celsius < 2)   return 'freezing';
+      if (celsius < 12)  return 'cold';
+      if (celsius < 20)  return 'mild';
+      if (celsius < 28)  return 'warm';
+      return 'hot';
+    }
+
+    function buildContext(conditionKey, timeSlot, tempRange) {
+      const slotData = CONTEXT_DATA[conditionKey]?.[timeSlot] || CONTEXT_DATA[conditionKey]?.afternoon || {};
+      const baseTerms = slotData.searchTerms || CONDITIONS[conditionKey].searchTerms;
+      const poeticLine = slotData.poeticLine   || CONDITIONS[conditionKey].poeticLine;
+      const mods = TEMP_MODIFIERS[tempRange] || [];
+      const searchTerms = mods.length
+        ? [...baseTerms, ...mods.map(m => baseTerms[0] + ' ' + m)]
+        : baseTerms;
+      return {
+        searchTerms,
+        timeOverlay: TIME_OVERLAYS[timeSlot] || TIME_OVERLAYS.afternoon,
+        poeticLine,
+      };
+    }
+
+    function timeout(ms) {
+      return new Promise((_, r) => setTimeout(() => r(new Error('timed out')), ms));
+    }
+    async function safeFetch(url, opts = {}) {
+      return Promise.race([fetch(url, opts), timeout(5000)]);
+    }
+    function setLoaderText(t) { document.getElementById('loader-text').textContent = t; }
+    function toF(c) { return Math.round(c * 9 / 5 + 32); }
+
+    /* Clock — 12-hour, no seconds, timezone-aware */
+    function showDragHint() {
+      if (window.innerWidth > 639) return;
+      const hint = document.getElementById('drag-hint');
+      hint.classList.add('visible');
+      hint.addEventListener('animationend', () => { hint.style.display = 'none'; }, { once: true });
+    }
+
+    function startClock() {
+      function tick() {
+        const now = new Date();
+        const tz = state.timezone || undefined;
+        document.getElementById('time-display').textContent =
+          now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz });
+        document.getElementById('date-display').textContent =
+          now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz });
+        const slot = getTimeSlot(getLocalHour());
+        document.getElementById('time-icon').innerHTML = TIME_ICONS[slot] || '';
+      }
+      tick();
+      if (state.clockInterval) clearInterval(state.clockInterval);
+      state.clockInterval = setInterval(tick, 1000);
+    }
+
+    /* Geolocation — prompts for permission and hints the user if needed */
+    function getLocation() {
+      if (!navigator.geolocation) return Promise.reject(new Error('not supported'));
+
+      /* Check permission state so we can show an instructional hint while
+         the browser's Allow/Deny dialog is on screen. */
+      let hintShown = false;
+      if (navigator.permissions) {
+        navigator.permissions.query({ name: 'geolocation' })
+          .then(perm => {
+            if (!hintShown && perm.state === 'prompt') {
+              setLoaderText('tap "Allow" to continue');
+            }
+          })
+          .catch(() => {});
+      }
+
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          p => {
+            hintShown = true;
+            resolve({ lat: p.coords.latitude, lon: p.coords.longitude });
+          },
+          err => {
+            hintShown = true;
+            reject(err);
+          },
+          { timeout: 12000, maximumAge: 300000 }
+        );
+      });
+    }
+
+    /* Reverse geocode */
+    async function reverseGeocode(lat, lon) {
+      try {
+        const res = await safeFetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`,
+          { headers: { 'User-Agent': 'weather-painting-app/1.0', 'Accept-Language': 'en' } }
+        );
+        const d = await res.json();
+        const a = d.address || {};
+        state.cityName    = a.city || a.town || a.village || a.county || a.suburb || a.state || '';
+        state.countryName = a.country || '';
+      } catch (_) {
+        state.cityName    = `${lat.toFixed(2)}°`;
+        state.countryName = `${lon.toFixed(2)}°`;
+      }
+      updateLocationBtn();
+    }
+
+    function updateLocationBtn() {
+      const label = state.cityName
+        ? `${state.cityName}${state.countryName ? ', ' + state.countryName : ''}`
+        : 'unknown location';
+      document.getElementById('location-label').textContent = label;
+    }
+
+    /* Weather */
+    async function fetchWeather(lat, lon) {
+      const res = await safeFetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`
+      );
+      const d = await res.json();
+      const c = d.current || {};
+      state.temperatureC = c.temperature_2m != null ? Math.round(c.temperature_2m) : null;
+      state.timezone = d.timezone || null;
+      const condition = resolveCondition(c.weather_code ?? 1);
+      state.condition = condition;
+      state.timeSlot  = getTimeSlot(getLocalHour());
+      state.tempRange = getTemperatureRange(state.temperatureC);
+      const ctx = buildContext(condition.key, state.timeSlot, state.tempRange);
+      state.currentContext  = ctx;
+      state.currentSearchTerms = ctx.searchTerms;
+      return condition;
+    }
+
+    /* Paintings — tries European Paintings (21) first, then American Wing (11), then unrestricted */
+    /* ── Per-source search helpers ────────────────────────────────────── */
+    async function searchMet(term, deptId) {
+      const dp = deptId != null ? `&departmentId=${deptId}` : '';
+      const r  = await safeFetch(
+        `https://collectionapi.metmuseum.org/public/collection/v1/search?q=${encodeURIComponent(term)}&hasImages=true${dp}`
+      );
+      const d = await r.json();
+      return (d.objectIDs || []).slice(0, 40).map(id => ({ id, source: 'met' }));
+    }
+
+    async function searchAIC(term) {
+      const r = await safeFetch(
+        `https://api.artic.edu/api/v1/artworks/search?q=${encodeURIComponent(term)}&fields=id,title,artist_display,date_display,image_id&limit=30`
+      );
+      const d = await r.json();
+      return (d.data || []).filter(x => x.image_id).map(x => ({ id: x.id, source: 'aic', data: x }));
+    }
+
+    async function searchCleveland(term) {
+      const r = await safeFetch(
+        `https://openaccess-api.clevelandart.org/api/artworks/?q=${encodeURIComponent(term)}&has_image=1&type=Painting&limit=20`
+      );
+      const d = await r.json();
+      return (d.data || []).filter(x => x.images?.web?.url).map(x => ({ id: x.id, source: 'cleveland', data: x }));
+    }
+
+    async function getMetDetail(id) {
+      const r = await safeFetch(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${id}`);
+      const d = await r.json();
+      const imageUrl = d.primaryImage || d.primaryImageSmall || '';
+      if (!imageUrl) return null;
+      return { title: d.title || 'Untitled', artist: d.artistDisplayName || 'Artist Unknown',
+               year: d.objectDate || '', imageUrl, source: 'The Metropolitan Museum of Art' };
+    }
+
+    function getAICDetail(c) {
+      const imageUrl = `https://www.artic.edu/iiif/2/${c.data.image_id}/full/1686,/0/default.jpg`;
+      const artist   = (c.data.artist_display || 'Artist Unknown').split('\n')[0];
+      return { title: c.data.title || 'Untitled', artist, year: c.data.date_display || '',
+               imageUrl, source: 'The Art Institute of Chicago' };
+    }
+
+    function getClevelandDetail(c) {
+      const imageUrl = c.data.images?.print?.url || c.data.images?.web?.url || '';
+      return { title: c.data.title || 'Untitled',
+               artist: c.data.creators?.[0]?.description?.split(' (')[0] || 'Artist Unknown',
+               year: c.data.creation_date || '', imageUrl,
+               source: 'The Cleveland Museum of Art' };
+    }
+
+    /* Rijksmuseum — 800k+ paintings, Google CDN images (2000px+), CORS-open */
+    async function searchRijksmuseum(term) {
+      const conditionQ = {
+        sunny:  'sunlight landscape golden',
+        cloudy: 'overcast sky landscape grey',
+        foggy:  'mist fog morning landscape',
+        rainy:  'rain storm landscape',
+        snowy:  'winter snow landscape',
+        stormy: 'storm sea waves dramatic',
+      };
+      const q = conditionQ[state.condition?.key] || (term + ' painting');
+      const r = await safeFetch(
+        `https://www.rijksmuseum.nl/api/en/collection?key=0fiuZFh4&q=${encodeURIComponent(q)}&type=painting&imgonly=true&ps=12&s=relevance`
+      );
+      const d = await r.json();
+      return (d.artObjects || []).filter(x => x.webImage?.url).map(x => ({
+        id: x.objectNumber, source: 'rijks', data: {
+          title:    x.title || 'Untitled',
+          artist:   x.principalOrFirstMaker || 'Artist Unknown',
+          year:     x.dating?.sortingDate?.toString() || '',
+          imageUrl: x.webImage.url.replace(/=s\d+$/, '=s0'),
+        },
+      }));
+    }
+    function getRijksDetail(c) {
+      return { title: c.data.title, artist: c.data.artist, year: c.data.year,
+               imageUrl: c.data.imageUrl, source: 'Rijksmuseum' };
+    }
+
+    /* Europeana — 50M+ European cultural heritage objects, CORS-enabled, public demo key */
+    async function searchEuropeana(term) {
+      const conditionQ = {
+        sunny:  'sunlight landscape oil painting',
+        cloudy: 'overcast grey sky landscape painting',
+        foggy:  'fog mist atmosphere landscape painting',
+        rainy:  'rain weather landscape painting',
+        snowy:  'snow winter landscape painting',
+        stormy: 'storm sea waves painting',
+      };
+      const q = conditionQ[state.condition?.key] || (term + ' painting');
+      const r = await safeFetch(
+        `https://api.europeana.eu/record/v2/search.json?query=${encodeURIComponent(q)}&wskey=api2demo&profile=rich&rows=24&qf=TYPE:IMAGE&qf=REUSABILITY:open`
+      );
+      const d = await r.json();
+      return (d.items || []).map(x => {
+        const imageUrl = (x.edmIsShownBy?.[0] || x.edmPreview?.[0] || '').replace(/^http:/, 'https:');
+        return { id: x.id || x.title, source: 'europeana', data: {
+          title:  (Array.isArray(x.title)     ? x.title[0]     : x.title)     || 'Untitled',
+          artist: (Array.isArray(x.dcCreator) ? x.dcCreator[0] : x.dcCreator) || 'Artist Unknown',
+          year:   (Array.isArray(x.year)      ? x.year[0]      : x.year)      || '',
+          imageUrl,
+        }};
+      }).filter(x => x.data.imageUrl && /\.(jpe?g|png|webp)/i.test(x.data.imageUrl));
+    }
+    function getEuropeanaDetail(c) {
+      return { title: c.data.title, artist: c.data.artist, year: c.data.year,
+               imageUrl: c.data.imageUrl, source: 'Europeana' };
+    }
+
+    async function searchWikimedia(term) {
+      /* Primary: category-based search — curated painting categories return
+         actual artworks reliably, unlike keyword search on filenames. */
+      const WIKI_CATS = {
+        sunny:  ['Plein_air_paintings', 'Impressionist_paintings', 'Oil_paintings_of_landscapes'],
+        cloudy: ['Paintings_of_landscapes', 'Barbizon_school_paintings', 'Landscape_paintings'],
+        foggy:  ['Paintings_of_fog', 'Paintings_of_rivers', 'Atmospheric_paintings'],
+        rainy:  ['Paintings_of_rain', 'Impressionist_paintings', 'Paintings_of_landscapes'],
+        snowy:  ['Paintings_of_snow', 'Winter_landscape_paintings', 'Paintings_of_winter'],
+        stormy: ['Maritime_paintings', 'Seascape_paintings', 'Paintings_of_storms_at_sea'],
+      };
+      const cats = WIKI_CATS[state.condition?.key] || ['Oil_paintings_of_landscapes'];
+      const cat  = cats[Math.floor(Math.random() * cats.length)];
+
+      function parseWikiPages(d) {
+        return Object.values(d.query?.pages || {}).filter(p => {
+          const info = p.imageinfo?.[0];
+          const url  = info?.thumburl || info?.url || '';
+          if (!url || !/\.(jpe?g|png)$/i.test(url)) return false;
+          if (info.width && info.width < 1200) return false;
+          return true;
+        }).map(p => {
+          const info = p.imageinfo[0];
+          const meta = info.extmetadata || {};
+          const rawArtist = (meta.Artist?.value || '').replace(/<[^>]*>/g, '').trim();
+          const year = (meta.DateTimeOriginal?.value || meta.DateTime?.value || '').match(/\d{4}/)?.[0] || '';
+          return {
+            id: p.pageid, source: 'wikimedia',
+            data: {
+              title: (meta.ObjectName?.value || p.title.replace('File:', '').replace(/\.[^.]+$/, '')).trim(),
+              artist: rawArtist.split(/[;,\n]/)[0].trim() || 'Artist Unknown',
+              year, imageUrl: info.thumburl || info.url,
+            }
+          };
+        });
+      }
+
+      try {
+        const r = await safeFetch(
+          `https://commons.wikimedia.org/w/api.php?action=query&generator=categorymembers&gcmtitle=Category:${encodeURIComponent(cat)}&gcmlimit=20&gcmtype=file&prop=imageinfo&iiprop=url%7Cextmetadata%7Csize&iiurlwidth=1600&format=json&origin=*`
+        );
+        const d = await r.json();
+        const results = parseWikiPages(d);
+        if (results.length) return results;
+      } catch (_) {}
+
+      /* Fallback: keyword search */
+      const q = encodeURIComponent(term + ' painting');
+      const r2 = await safeFetch(
+        `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${q}&gsrnamespace=6&gsrlimit=18&prop=imageinfo&iiprop=url%7Cextmetadata%7Csize&iiurlwidth=1600&format=json&origin=*`
+      );
+      const d2 = await r2.json();
+      return parseWikiPages(d2);
+    }
+
+    function getWikimediaDetail(c) {
+      return { title: c.data.title, artist: c.data.artist, year: c.data.year,
+               imageUrl: c.data.imageUrl, source: 'Wikimedia Commons' };
+    }
+
+    /* Time-slot aware fallback terms so we never show a sunrise painting at night */
+    const TIME_FALLBACKS = {
+      dawn:      'sunrise dawn pastoral golden',
+      morning:   'morning light landscape pastoral',
+      afternoon: 'sunny afternoon pastoral countryside',
+      dusk:      'sunset dusk golden landscape',
+      evening:   'twilight evening landscape',
+      night:     'nocturne moonlit dark landscape',
+    };
+
+    /* Hardcoded fallback paintings. Two URL helpers:
+       _FP  → Wikimedia Commons Special:FilePath redirect (no hash needed)
+       _AIC → Art Institute of Chicago IIIF (fast CDN, CORS-open, very reliable) */
+    const _FP  = n => `https://commons.wikimedia.org/wiki/Special:FilePath/${n}?width=1600`;
+    const _AIC = id => `https://www.artic.edu/iiif/2/${id}/full/1686,/0/default.jpg`;
+    const CURATED_PAINTINGS = {
+      sunny: [
+        /* AIC IIIF — these load reliably from any browser */
+        { title: 'A Sunday on La Grande Jatte', artist: 'Georges Seurat', year: '1886',
+          imageUrl: _AIC('1adf2696-8489-499b-cad2-821d7fde4b33') },
+        { title: 'The Artist\'s Bedroom in Arles', artist: 'Vincent van Gogh', year: '1889',
+          imageUrl: _AIC('25c31d8d-21a4-9ea1-1d73-6a2ecca3adda') },
+        /* Wikimedia fallbacks */
+        { title: 'Luncheon of the Boating Party', artist: 'Pierre-Auguste Renoir', year: '1881',
+          imageUrl: _FP('Pierre-Auguste_Renoir_-_Luncheon_of_the_Boating_Party.jpg') },
+        { title: 'The Hay Wain', artist: 'John Constable', year: '1821',
+          imageUrl: _FP('John_Constable_-_The_Hay_Wain_%281821%29.jpg') },
+        { title: 'Wheat Field with Cypresses', artist: 'Vincent van Gogh', year: '1889',
+          imageUrl: _FP('Vincent_van_Gogh_-_Wheat_Field_with_Cypresses_%281889%29.jpg') },
+        { title: 'The Gleaners', artist: 'Jean-François Millet', year: '1857',
+          imageUrl: _FP('Jean-Fran%C3%A7ois_Millet_-_Gleaners_-_Google_Art_Project_2.jpg') },
+        { title: 'The Birth of Venus', artist: 'Sandro Botticelli', year: '1485',
+          imageUrl: _FP('The_Birth_of_Venus_%28Botticelli%29.jpg') },
+      ],
+      cloudy: [
+        { title: 'The Wanderer above the Sea of Fog', artist: 'Caspar David Friedrich', year: '1818',
+          imageUrl: _FP('Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg') },
+        { title: 'Stacks of Wheat (End of Summer)', artist: 'Claude Monet', year: '1891',
+          imageUrl: _AIC('64c59e42-b6cb-6fd8-b3e6-70d6ad91dee3') },
+        { title: 'Cloud Study', artist: 'John Constable', year: '1822',
+          imageUrl: _FP('John_Constable_-_Cloud_Study_-_1822.jpg') },
+        { title: 'The Evening Star', artist: 'J.M.W. Turner', year: '1830',
+          imageUrl: _FP('Joseph_Mallord_William_Turner_-_The_Evening_Star_-_WGA23178.jpg') },
+        { title: 'Poplars on the Banks of the Epte', artist: 'Claude Monet', year: '1891',
+          imageUrl: _FP('Claude_Monet_-_Poplars_%28Philadelphia%29.jpg') },
+        { title: 'The Raft of the Medusa', artist: 'Théodore Géricault', year: '1819',
+          imageUrl: _FP('JEAN_LOUIS_TH%C3%89ODORE_G%C3%89RICAULT_-_La_Balsa_de_la_Medusa_%28Museo_del_Louvre%2C_1818-19%29.jpg') },
+      ],
+      foggy: [
+        { title: 'Impression, Sunrise', artist: 'Claude Monet', year: '1872',
+          imageUrl: _FP('Monet_-_Impression%2C_Sunrise.jpg') },
+        { title: 'Water Lilies', artist: 'Claude Monet', year: '1906',
+          imageUrl: _AIC('3c27b499-af56-f0d5-93b5-a7f2f1ad5813') },
+        { title: 'Morning on the Seine', artist: 'Claude Monet', year: '1897',
+          imageUrl: _FP('Claude_Monet_Morning_on_the_Seine_1897.jpg') },
+        { title: 'Houses of Parliament, Sunset', artist: 'Claude Monet', year: '1903',
+          imageUrl: _FP('Claude_Monet%2C_The_Houses_of_Parliament_-_Sunset_1903.jpg') },
+        { title: 'Two Men Contemplating the Moon', artist: 'Caspar David Friedrich', year: '1825',
+          imageUrl: _FP('Caspar_David_Friedrich_-_Two_Men_Contemplating_the_Moon_-_WGA08253.jpg') },
+        { title: 'Fog Warning', artist: 'Winslow Homer', year: '1885',
+          imageUrl: _FP('Homer-fogwarning.jpg') },
+      ],
+      rainy: [
+        /* AIC — Paris Street; Rainy Day is their most iconic painting */
+        { title: 'Paris Street; Rainy Day', artist: 'Gustave Caillebotte', year: '1877',
+          imageUrl: _AIC('831a05de-d3f6-f4fa-a460-23008dd58dda') },
+        { title: 'Paris Street, Rainy Day', artist: 'Gustave Caillebotte', year: '1877',
+          imageUrl: _FP('Gustave_Caillebotte_-_Paris_Street%3B_Rainy_Day_-_Google_Art_Project.jpg') },
+        { title: 'Rain, Steam, and Speed', artist: 'J.M.W. Turner', year: '1844',
+          imageUrl: _FP('Turner-rain-steam.jpg') },
+        { title: 'Sudden Shower over Shin-Ōhashi Bridge', artist: 'Hiroshige', year: '1857',
+          imageUrl: _FP('Hiroshige_Sudden_Shower_over_Shin-Ohashi_Bridge.jpg') },
+        { title: 'The Umbrellas', artist: 'Pierre-Auguste Renoir', year: '1886',
+          imageUrl: _FP('Pierre-Auguste_Renoir_-_The_Umbrellas.jpg') },
+        { title: 'After the Rain', artist: 'George Inness', year: '1894',
+          imageUrl: _FP('George_Inness_-_After_the_Rain_-_Google_Art_Project.jpg') },
+      ],
+      snowy: [
+        { title: 'The Magpie', artist: 'Claude Monet', year: '1869',
+          imageUrl: _FP('Claude_Monet_-_The_Magpie_-_Google_Art_Project.jpg') },
+        { title: 'Hunters in the Snow', artist: 'Pieter Bruegel the Elder', year: '1565',
+          imageUrl: _FP('Pieter_Bruegel_the_Elder_-_Hunters_in_the_Snow_%28Winter%29_-_Google_Art_Project.jpg') },
+        { title: 'Snow at Louveciennes', artist: 'Alfred Sisley', year: '1878',
+          imageUrl: _FP('Alfred_Sisley_-_Snow_at_Louveciennes_-_WGA21189.jpg') },
+        { title: 'Winter Landscape with Skaters', artist: 'Hendrick Avercamp', year: '1608',
+          imageUrl: _FP('Hendrick_Avercamp_-_Winter_Landscape_with_Skaters_-_WGA01076.jpg') },
+        { title: 'Train in the Snow', artist: 'Claude Monet', year: '1875',
+          imageUrl: _FP('Claude_Monet_-_The_Gare_Saint-Lazare_-_Google_Art_Project.jpg') },
+      ],
+      stormy: [
+        { title: 'The Ninth Wave', artist: 'Ivan Aivazovsky', year: '1850',
+          imageUrl: _FP('Ivan_Aivazovsky_-_The_Ninth_Wave_-_Google_Art_Project.jpg') },
+        { title: 'Snow Storm: Steam-Boat off a Harbour\'s Mouth', artist: 'J.M.W. Turner', year: '1842',
+          imageUrl: _FP('Joseph_Mallord_William_Turner_-_Snow_Storm_-_Steam-Boat_off_a_Harbour%27s_Mouth.jpg') },
+        { title: 'Watson and the Shark', artist: 'John Singleton Copley', year: '1778',
+          imageUrl: _FP('John_Singleton_Copley_-_Watson_and_the_Shark_-_Google_Art_Project.jpg') },
+        { title: 'The Storm', artist: 'Pierre-Auguste Cot', year: '1880',
+          imageUrl: _FP('Pierre-Auguste_Cot_-_The_Storm_-_1880.jpg') },
+        { title: 'Starry Night over the Rhône', artist: 'Vincent van Gogh', year: '1888',
+          imageUrl: _FP('Starry_Night_Over_the_Rhone.jpg') },
+      ],
+    };
+
+    function fetchCuratedPainting(conditionKey) {
+      const pool = CURATED_PAINTINGS[conditionKey] || CURATED_PAINTINGS.cloudy;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      return { ...pick, source: 'Wikimedia Commons' };
+    }
+
+    async function _fetchViaAPIs(searchTerms) {
+      const fallback = TIME_FALLBACKS[state.timeSlot] || 'landscape painting';
+      const terms = [...new Set([...searchTerms.slice(0, 3), fallback])];
+
+      /* Within one search term: try free sources first (inline data or single
+         request), then Met in parallel (requires an extra API call per painting). */
+      async function tryTerm(term) {
+        const [r0, r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
+          searchMet(term, 21).catch(() => []),
+          searchMet(term, null).catch(() => []),
+          searchAIC(term).catch(() => []),
+          searchCleveland(term).catch(() => []),
+          searchWikimedia(term).catch(() => []),
+          searchEuropeana(term).catch(() => []),
+          searchRijksmuseum(term).catch(() => []),
+        ]);
+        const metIds = new Set((r0.value || []).map(x => x.id));
+        const free = [
+          ...(r2.value || []),
+          ...(r3.value || []),
+          ...(r4.value || []),
+          ...(r5.value || []),
+          ...(r6.value || []),
+        ].sort(() => Math.random() - 0.5);
+        const metCandidates = [
+          ...(r0.value || []).slice(0, 12),
+          ...(r1.value || []).filter(x => !metIds.has(x.id)).slice(0, 6),
+        ].sort(() => Math.random() - 0.5).slice(0, 6);
+
+        /* Free sources: inline data, no extra request needed */
+        for (const c of free) {
+          try {
+            const p = c.source === 'aic'       ? getAICDetail(c)
+                    : c.source === 'cleveland'  ? getClevelandDetail(c)
+                    : c.source === 'europeana'  ? getEuropeanaDetail(c)
+                    : c.source === 'rijks'      ? getRijksDetail(c)
+                    : getWikimediaDetail(c);
+            if (p?.imageUrl) return p;
+          } catch (_) {}
+        }
+
+        /* Met: fetch all candidates in parallel, return first with an image */
+        const metResults = await Promise.allSettled(
+          metCandidates.map(c => getMetDetail(c.id))
+        );
+        for (const r of metResults) {
+          if (r.status === 'fulfilled' && r.value?.imageUrl) return r.value;
+        }
+        return null;
+      }
+
+      /* Run all terms concurrently — resolve with the first painting found. */
+      const painting = await new Promise(resolve => {
+        let resolved = false, remaining = terms.length;
+        if (!remaining) { resolve(null); return; }
+        terms.forEach(term => {
+          tryTerm(term)
+            .then(p => { if (p && !resolved) { resolved = true; resolve(p); } })
+            .catch(() => {})
+            .finally(() => { if (!--remaining && !resolved) resolve(null); });
+        });
+      });
+      if (painting) return painting;
+
+      // Last resort — Wikimedia + Met with time fallback, both parallel
+      try {
+        const [wikiItems, metItems] = await Promise.allSettled([
+          searchWikimedia(fallback).catch(() => []),
+          searchMet(fallback, null).catch(() => []),
+        ]);
+        for (const c of (wikiItems.value || [])) {
+          try { const p = getWikimediaDetail(c); if (p?.imageUrl) return p; } catch (_) {}
+        }
+        const metLastResort = (metItems.value || []).sort(() => Math.random() - 0.5).slice(0, 8);
+        const metFallbacks = await Promise.allSettled(metLastResort.map(c => getMetDetail(c.id)));
+        for (const r of metFallbacks) {
+          if (r.status === 'fulfilled' && r.value?.imageUrl) return r.value;
+        }
+      } catch (_) {}
+
+      return null;
+    }
+
+    /* Public entry point: races API fetch against a 4-second curated fallback
+       so users never wait more than ~4s to see a painting. */
+    async function fetchPainting(searchTerms) {
+      const key = state.condition?.key || 'cloudy';
+      const painting = await Promise.race([
+        _fetchViaAPIs(searchTerms).catch(() => null),
+        new Promise(r => setTimeout(r, 4000)),
+      ]);
+      return painting || fetchCuratedPainting(key);
+    }
+
+    /* Extract painting's dominant colour, blend with time-of-day + weather,
+       set --paint-rgb CSS variable, update overlay ambient glow, return
+       darkened colour string for the bottom bar --bc gradient. */
+    async function extractPaintingPalette(imageUrl) {
+      try {
+        const W = 40, H = 30;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = imageUrl; });
+        ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, W, H);
+        const data = ctx.getImageData(0, 0, W, H).data;
+
+        /* Weighted average — centre pixels count more than edges */
+        let r = 0, g = 0, b = 0, total = 0;
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            const cx = (x / W) - 0.5, cy = (y / H) - 0.5;
+            const w = 1 + (1 - Math.min(1, Math.sqrt(cx*cx + cy*cy) * 2.4)) * 0.6;
+            const i = (y * W + x) * 4;
+            r += data[i] * w; g += data[i+1] * w; b += data[i+2] * w; total += w;
+          }
+        }
+        r = Math.round(r / total);
+        g = Math.round(g / total);
+        b = Math.round(b / total);
+
+        /* Time-of-day tint — nudge the colour toward the hour's warmth/coolness */
+        const timeTints = {
+          dawn:      [255, 130,  55, 0.22],
+          morning:   [255, 218, 138, 0.11],
+          afternoon: [255, 248, 205, 0.05],
+          dusk:      [255,  82,  12, 0.28],
+          evening:   [ 62,  26, 105, 0.22],
+          night:     [  8,   6,  42, 0.36],
+        };
+        /* Weather tint — further shift toward the sky's character */
+        const weatherTints = {
+          sunny:  [255, 192,  42, 0.08],
+          cloudy: [136, 146, 158, 0.16],
+          foggy:  [190, 207, 222, 0.13],
+          rainy:  [ 36,  70, 152, 0.13],
+          snowy:  [205, 222, 255, 0.18],
+          stormy: [ 20,  16,  50, 0.22],
+        };
+        const blend = ([tr, tg, tb, ts]) => {
+          r = Math.round(r + (tr - r) * ts);
+          g = Math.round(g + (tg - g) * ts);
+          b = Math.round(b + (tb - b) * ts);
+        };
+        blend(timeTints[state.timeSlot]       || timeTints.afternoon);
+        blend(weatherTints[state.condition?.key] || [128, 128, 128, 0]);
+        r = Math.min(255, Math.max(0, r));
+        g = Math.min(255, Math.max(0, g));
+        b = Math.min(255, Math.max(0, b));
+
+        /* Expose as CSS variable — drives the attribution dot and ambient glow */
+        document.documentElement.style.setProperty('--paint-rgb', `${r},${g},${b}`);
+
+        /* Subtle colour glow from extracted palette — no time tint */
+        document.getElementById('overlay').style.background =
+          `radial-gradient(ellipse 90% 50% at 50% 100%, rgba(${r},${g},${b},0.18) 0%, transparent 100%)`;
+
+        /* Dark version for --bc bottom bar gradient */
+        return `rgba(${Math.round(r*0.18)},${Math.round(g*0.18)},${Math.round(b*0.18)},0.95)`;
+      } catch (_) { return null; }
+    }
+
+    /* Temperature — updates all displays */
+    function renderTemperature() {
+      const t = state.temperatureC === null
+        ? '--°'
+        : state.useFahrenheit ? `${toF(state.temperatureC)}°F` : `${state.temperatureC}°C`;
+      document.getElementById('mob-temp-display').textContent = t;
+      document.getElementById('bottom-temp-display').textContent = t;
+    }
+
+    function updateSound() {
+      if (state.soundEnabled) soundEngine.play(state.condition?.key || 'cloudy');
+      else soundEngine.stop();
+    }
+
+    /* Apply painting — loads new image silently; when ready, crossfades it
+       over the current content inside #painting-bg so there is never a blank.
+       Falls back through the full curated list before showing a gradient. */
+    function applyPainting(condition, painting, _tried) {
+      const tried = _tried || new Set();
+      const bg    = document.getElementById('painting-bg');
+      const bar   = document.getElementById('bottom-bar');
+      bar.style.setProperty('--bc', condition.bottomColor);
+
+      /* Swap new content into bg, cross-fading over whatever is there now. */
+      function commitNew(newImg, isGradient) {
+        const isMobile  = window.innerWidth < 640;
+        const hasLoaded = bg.classList.contains('loaded');
+
+        if (!hasLoaded || isMobile) {
+          /* First load, or mobile (where absolute positioning breaks scroll layout):
+             clear immediately, fade in fresh. */
+          bg.classList.remove('loaded', 'gradient-fallback');
+          bg.style.background = '';
+          bg.innerHTML = '';
+          if (isGradient) {
+            bg.style.background = condition.fallbackGradient;
+            bg.classList.add('loaded', 'gradient-fallback');
+          } else {
+            bg.appendChild(newImg);
+            requestAnimationFrame(() => requestAnimationFrame(() => bg.classList.add('loaded')));
+          }
+        } else {
+          /* Desktop crossfade: pin old img, overlay new img at opacity 0, then swap. */
+          const old = bg.querySelector('.painting-img');
+          if (old) {
+            Object.assign(old.style, {
+              position: 'absolute', inset: '0',
+              width: '100%', height: '100%', objectFit: 'cover',
+              zIndex: '0', transition: 'opacity 1s ease',
+            });
+          }
+          bg.classList.remove('gradient-fallback');
+          bg.style.background = '';
+          if (isGradient) {
+            if (old) { old.style.opacity = '0'; setTimeout(() => old?.remove(), 1100); }
+            bg.style.background = condition.fallbackGradient;
+            bg.classList.add('gradient-fallback');
+          } else {
+            Object.assign(newImg.style, {
+              position: 'absolute', inset: '0',
+              width: '100%', height: '100%', objectFit: 'cover',
+              zIndex: '1', opacity: '0', transition: 'opacity 1.3s ease',
+            });
+            bg.appendChild(newImg);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+              newImg.style.opacity = '1';
+              if (old) {
+                old.style.opacity = '0';
+                setTimeout(() => { if (old.parentNode === bg) old.remove(); }, 1100);
+              }
+            }));
+          }
+        }
+        if (!isGradient) {
+          extractPaintingPalette(painting.imageUrl).then(color => {
+            if (color) bar.style.setProperty('--bc', color);
+          });
+        }
+      }
+
+      function tryNext() {
+        const pool = CURATED_PAINTINGS[condition.key] || CURATED_PAINTINGS.cloudy;
+        const next = pool.find(p => !tried.has(p.imageUrl));
+        if (next) { applyPainting(condition, { ...next, source: 'Wikimedia Commons' }, tried); return; }
+        commitNew(null, true);
+      }
+
+      if (painting?.imageUrl) {
+        tried.add(painting.imageUrl);
+        const paintImg = document.createElement('img');
+        paintImg.alt = '';
+        paintImg.className = 'painting-img';
+        paintImg.referrerPolicy = 'no-referrer';
+        paintImg.onload = () => {
+          if (paintImg.naturalWidth > 0 && paintImg.naturalWidth < 900) { tryNext(); return; }
+          commitNew(paintImg, false);
+        };
+        paintImg.onerror = tryNext;
+        paintImg.src = painting.imageUrl;
+      } else {
+        commitNew(null, true);
+      }
+    }
+
+    /* Append a city-aware sentence to the poetic line */
+    function personalizeLine(poeticLine) {
+      const city = state.cityName;
+      if (!city) return poeticLine;
+      const phrases = {
+        dawn:      [`The light finds ${city} first.`,      `${city} wakes into it.`],
+        morning:   [`Above ${city}, all of this.`,          `${city} moves slowly through it.`],
+        afternoon: [`${city} holds it lightly.`,            `This is ${city} in full day.`],
+        dusk:      [`Somewhere in ${city}, this exact light.`, `${city} closes around it.`],
+        evening:   [`${city} settles into the dark.`,       `${city}, quiet now.`],
+        night:     [`${city} sleeps under it.`,             `${city}, still.`],
+      };
+      const opts = phrases[state.timeSlot || 'afternoon'] || [`${city}.`];
+      return `${poeticLine} ${opts[city.length % opts.length]}`;
+    }
+
+    /* Update bottom bar text */
+    function updateText(painting) {
+      const raw = state.currentContext?.poeticLine || state.condition?.poeticLine || '';
+      const poeticLine = personalizeLine(raw);
+      document.getElementById('poetic-line').textContent = poeticLine;
+      if (painting?.title) {
+        const year = painting.year ? `, ${painting.year}` : '';
+        document.getElementById('attribution-line').innerHTML =
+          `<em>"${painting.title}"</em> — ${painting.artist}${year}`;
+      } else {
+        document.getElementById('attribution-line').textContent = '';
+      }
+    }
+
+    /* Full render */
+    function render(condition, painting) {
+      state.currentPainting = painting || null;
+      applyPainting(condition, painting);
+      /* Bottom bar weather */
+      document.getElementById('bottom-emoji').innerHTML = condition.emoji;
+      document.getElementById('bottom-condition-display').textContent = condition.label;
+      /* Mobile center */
+      document.getElementById('mob-emoji').innerHTML = condition.emoji;
+      document.getElementById('mob-condition-display').textContent = condition.label;
+      renderTemperature();
+      updateText(painting);
+      document.getElementById('mobile-center').classList.remove('updating');
+      document.getElementById('bottom-bar').classList.remove('updating');
+      if (state.soundEnabled) soundEngine.setCondition(condition.key);
+    }
+
+    /* Load a new location */
+    async function loadLocation(lat, lon, skipGeocode = false) {
+      state.lat = lat; state.lon = lon;
+      document.getElementById('mobile-center').classList.add('updating');
+      document.getElementById('bottom-bar').classList.add('updating');
+      document.getElementById('location-label').textContent = 'loading…';
+      try {
+        const [, wr] = await Promise.allSettled([
+          skipGeocode ? Promise.resolve() : reverseGeocode(lat, lon),
+          fetchWeather(lat, lon),
+        ]);
+        const condition = wr.status === 'fulfilled' ? wr.value : CONDITIONS.cloudy;
+        if (wr.status !== 'fulfilled') {
+          state.condition = CONDITIONS.cloudy;
+          state.temperatureC = null;
+          state.timeSlot  = getTimeSlot(getLocalHour());
+          state.tempRange = 'mild';
+          state.currentContext = buildContext('cloudy', state.timeSlot, 'mild');
+          state.currentSearchTerms = state.currentContext.searchTerms;
+        }
+        const painting = await fetchPainting(state.currentSearchTerms);
+        render(condition, painting);
+        updateLocationBtn();
+      } catch (err) {
+        document.getElementById('mobile-center').classList.remove('updating');
+        document.getElementById('bottom-bar').classList.remove('updating');
+        updateLocationBtn();
+        console.error(err);
+      }
+    }
+
+    /* City search */
+    let searchDebounce = null, kbIndex = -1;
+
+    function openSearch() {
+      document.getElementById('location-btn').classList.add('morphed');
+      document.getElementById('location-search').classList.add('open');
+      document.getElementById('search-input').value = '';
+      document.getElementById('search-results-list').innerHTML = '';
+      setTimeout(() => document.getElementById('search-input').focus(), 60);
+    }
+    function closeSearch() {
+      document.getElementById('location-btn').classList.remove('morphed');
+      document.getElementById('location-search').classList.remove('open');
+      document.getElementById('search-input').value = '';
+      document.getElementById('search-results-list').innerHTML = '';
+      kbIndex = -1;
+    }
+    async function geocodeSearch(query) {
+      query = query.trim();
+      if (query.length < 2) { renderSearchResults([]); return; }
+      try {
+        const res = await safeFetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=7&language=en&format=json`
+        );
+        const d = await res.json();
+        renderSearchResults(d.results || []);
+      } catch (_) { renderSearchResults([]); }
+    }
+    function renderSearchResults(results) {
+      kbIndex = -1;
+      const list  = document.getElementById('search-results-list');
+      const query = document.getElementById('search-input').value.trim();
+      if (!results.length) {
+        list.innerHTML = query.length >= 2
+          ? `<li id="search-empty"><span>🔍</span>no results for "${query}"</li>`
+          : `<li id="search-empty"><span>🌍</span>type a city name</li>`;
+        return;
+      }
+      list.innerHTML = results.map((r, i) => {
+        const region = [r.admin1, r.country].filter(Boolean).join(', ');
+        return `<li role="option" tabindex="-1"
+            data-lat="${r.latitude}" data-lon="${r.longitude}"
+            data-city="${r.name}" data-country="${r.country || ''}"
+            data-index="${i}">
+          <span class="result-text">
+            <span class="result-city">${r.name}</span>
+            <span class="result-region">${region}</span>
+          </span></li>`;
+      }).join('');
+      list.querySelectorAll('li[data-lat]').forEach(li =>
+        li.addEventListener('click', () => selectCity(li))
+      );
+    }
+    function selectCity(li) {
+      state.cityName    = li.dataset.city;
+      state.countryName = li.dataset.country;
+      closeSearch();
+      loadLocation(parseFloat(li.dataset.lat), parseFloat(li.dataset.lon), true);
+    }
+    document.addEventListener('keydown', e => {
+      if (!document.getElementById('location-search').classList.contains('open')) return;
+      const items = Array.from(document.querySelectorAll('#search-results-list li[data-lat]'));
+      if (e.key === 'Escape') { closeSearch(); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); kbIndex = Math.min(kbIndex + 1, items.length - 1); updateKb(items); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); kbIndex = Math.max(kbIndex - 1, -1); updateKb(items); }
+      else if (e.key === 'Enter' && kbIndex >= 0 && items[kbIndex]) { e.preventDefault(); selectCity(items[kbIndex]); }
+    });
+    function updateKb(items) {
+      items.forEach((li, i) => li.classList.toggle('kb-active', i === kbIndex));
+      if (kbIndex >= 0) items[kbIndex]?.scrollIntoView({ block: 'nearest' });
+    }
+
+    /* Error */
+    function showError(type) {
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('error-panel').classList.add('visible');
+      const icons    = { location: '📍', network: '🌐', generic: '⚠️' };
+      const titles   = { location: 'location access needed', network: 'connection problem', generic: 'something went wrong' };
+      const messages = {
+        location: 'allow location access in your browser so we can fetch your local weather and find a matching painting for your moment.',
+        network:  'could not reach the weather or painting services. check your connection and try again.',
+        generic:  'an unexpected error occurred. please reload.',
+      };
+      document.getElementById('error-icon').textContent    = icons[type]    ?? icons.generic;
+      document.getElementById('error-title').textContent   = titles[type]   ?? titles.generic;
+      document.getElementById('error-message').textContent = messages[type] ?? messages.generic;
+    }
+
+    /* Init */
+    async function init() {
+      try {
+        setLoaderText('locating you…');
+        const { lat, lon } = await getLocation();
+        state.lat = lat; state.lon = lon;
+
+        setLoaderText('fetching weather…');
+        const [, wr] = await Promise.allSettled([
+          reverseGeocode(lat, lon),
+          fetchWeather(lat, lon),
+        ]);
+        const condition = wr.status === 'fulfilled'
+          ? wr.value
+          : (() => {
+              state.condition = CONDITIONS.cloudy;
+              state.timeSlot  = getTimeSlot(getLocalHour());
+              state.tempRange = 'mild';
+              state.currentContext = buildContext('cloudy', state.timeSlot, 'mild');
+              state.currentSearchTerms = state.currentContext.searchTerms;
+              return CONDITIONS.cloudy;
+            })();
+
+        setLoaderText('finding a painting…');
+        const painting = await fetchPainting(state.currentSearchTerms);
+
+        const app = document.getElementById('app');
+        app.style.display = 'block';
+        document.getElementById('loader').classList.add('fade-out');
+        setTimeout(() => { document.getElementById('loader').style.display = 'none'; }, 550);
+        requestAnimationFrame(() => requestAnimationFrame(() => app.classList.add('revealed')));
+
+        render(condition, painting);
+        startClock();
+        showDragHint();
+
+        /* Try to start sound immediately; browsers that still block autoplay
+           will resume it on the very first user interaction (click / touch). */
+        updateSound();
+        let soundUnlocked = false;
+        const unlockSound = () => {
+          if (soundUnlocked) return;
+          soundUnlocked = true;
+          if (state.soundEnabled) updateSound();
+        };
+        document.addEventListener('click',      unlockSound, { once: true, capture: true });
+        document.addEventListener('touchstart', unlockSound, { once: true, capture: true, passive: true });
+        document.addEventListener('keydown',    unlockSound, { once: true, capture: true });
+      } catch (err) {
+        console.error(err);
+        if (err.code === 1 || err.code === 2 || err.message?.includes('denied')) showError('location');
+        else if (err.message?.includes('timed out') || err.message?.includes('fetch')) showError('network');
+        else showError('generic');
+      }
+    }
+
+    /* ── Share card ──────────────────────────────────────────────────────── */
+    async function loadImageForCanvas(url) {
+      try {
+        const res = await fetch(url, { mode: 'cors' });
+        if (!res.ok) return null;
+        const blobUrl = URL.createObjectURL(await res.blob());
+        return await new Promise(resolve => {
+          const img = new Image();
+          img.onload = () => { URL.revokeObjectURL(blobUrl); resolve(img); };
+          img.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(null); };
+          img.src = blobUrl;
+        });
+      } catch (_) { return null; }
+    }
+
+    function fitText(ctx, text, maxPx) {
+      if (ctx.measureText(text).width <= maxPx) return text;
+      while (text.length > 1 && ctx.measureText(text + '…').width > maxPx) text = text.slice(0, -1);
+      return text + '…';
+    }
+
+    async function generateShareCard() {
+      const W = 1080, H = 1350;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+
+      /* 1 — painting (fetched with CORS so canvas stays untainted) */
+      const painting = state.currentPainting;
+      let hasPainting = false;
+      if (painting?.imageUrl) {
+        const img = await loadImageForCanvas(painting.imageUrl);
+        if (img) {
+          const sc = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+          ctx.drawImage(img, (W - img.naturalWidth * sc) / 2, (H - img.naturalHeight * sc) / 2,
+                        img.naturalWidth * sc, img.naturalHeight * sc);
+          hasPainting = true;
+        }
+      }
+      if (!hasPainting) {
+        const stops = {
+          sunny:  [['#8b6200',0],['#c8820a',.4],['#e8b030',1]],
+          cloudy: [['#3a4550',0],['#5a6a78',.5],['#8899a8',1]],
+          foggy:  [['#a8b8c8',0],['#c8d8e8',.5],['#e2eef5',1]],
+          rainy:  [['#0e2040',0],['#1e3f6a',.5],['#2e5a90',1]],
+          snowy:  [['#a8c0e0',0],['#c8dcf5',.5],['#e8f0ff',1]],
+          stormy: [['#080810',0],['#141428',.5],['#1e1e3e',1]],
+        };
+        const fg = ctx.createLinearGradient(0, 0, W * .7, H);
+        (stops[state.condition?.key] || stops.cloudy).forEach(([c, s]) => fg.addColorStop(s, c));
+        ctx.fillStyle = fg; ctx.fillRect(0, 0, W, H);
+      }
+
+      /* 2 — gradient overlays: stronger at top (for city/date text), deep at bottom */
+      const topVig = ctx.createLinearGradient(0, 0, 0, 360);
+      topVig.addColorStop(0,   'rgba(0,0,0,0.72)');
+      topVig.addColorStop(0.5, 'rgba(0,0,0,0.22)');
+      topVig.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = topVig; ctx.fillRect(0, 0, W, 360);
+
+      const botGrad = ctx.createLinearGradient(0, 680, 0, H);
+      botGrad.addColorStop(0,    'rgba(0,0,0,0)');
+      botGrad.addColorStop(0.28, 'rgba(0,0,0,0.32)');
+      botGrad.addColorStop(0.62, 'rgba(0,0,0,0.68)');
+      botGrad.addColorStop(1,    'rgba(0,0,0,0.92)');
+      ctx.fillStyle = botGrad; ctx.fillRect(0, 680, W, H - 680);
+
+      await document.fonts.ready;
+
+      const PL = 82, MAXW = W - PL * 2;
+
+      /* 3 — city (top) */
+      ctx.font = '200 62px "DM Sans", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(fitText(ctx, state.cityName || 'Your Location', MAXW), PL, 108);
+
+      /* 4 — day + date (top) */
+      ctx.font = '300 26px "DM Sans", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.46)';
+      ctx.fillText(new Date().toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric',
+        timeZone: state.timezone || undefined,
+      }), PL, 158);
+
+      /* 5 — condition label (bottom section) */
+      ctx.font = '300 26px "DM Sans", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.50)';
+      ctx.fillText((state.condition?.label || '').toUpperCase(), PL, 876);
+
+      /* 6 — temperature (hero) */
+      ctx.font = '200 152px "DM Sans", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,1)';
+      const tempStr = state.temperatureC != null
+        ? (state.useFahrenheit ? `${toF(state.temperatureC)}°F` : `${state.temperatureC}°C`) : '—°';
+      ctx.fillText(tempStr, PL, 1022);
+
+      /* 7 — rule */
+      ctx.strokeStyle = 'rgba(255,255,255,0.13)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PL, 1080); ctx.lineTo(W - PL, 1080); ctx.stroke();
+
+      /* 8 — painting attribution (title + artist only, no museum) */
+      if (painting?.title) {
+        ctx.font = 'italic 300 22px "DM Sans", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.52)';
+        ctx.fillText(fitText(ctx, `"${painting.title}"`, MAXW), PL, 1132);
+
+        ctx.font = '300 20px "DM Sans", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.34)';
+        const al = `${painting.artist}${painting.year ? ` · ${painting.year}` : ''}`;
+        ctx.fillText(fitText(ctx, al, MAXW), PL, 1166);
+      }
+
+      /* 9 — branding watermark */
+      ctx.font = '300 18px "DM Sans", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+      ctx.textAlign = 'right';
+      ctx.fillText('weather · painted', W - PL, 1310);
+      ctx.textAlign = 'left';
+
+      return new Promise(resolve => canvas.toBlob(b => resolve(b), 'image/jpeg', 0.92));
+    }
+
+    async function shareCard() {
+      const btn = document.getElementById('share-btn');
+      if (btn.classList.contains('sharing')) return;
+      btn.classList.add('sharing');
+      try {
+        const blob = await generateShareCard();
+        if (!blob) throw new Error('generation failed');
+        const file = new File([blob], 'weather-painted.jpg', { type: 'image/jpeg' });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file] });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'weather-painted.jpg'; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') console.warn('share:', err);
+      } finally {
+        btn.classList.remove('sharing');
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      init();
+      document.getElementById('location-btn').addEventListener('click', openSearch);
+      document.getElementById('search-input').addEventListener('input', e => {
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => geocodeSearch(e.target.value), 320);
+      });
+      document.getElementById('search-close-btn').addEventListener('click', closeSearch);
+      document.getElementById('mob-temp-display').addEventListener('click', () => {
+        state.useFahrenheit = !state.useFahrenheit;
+        renderTemperature();
+      });
+      document.getElementById('bottom-temp-display').addEventListener('click', () => {
+        state.useFahrenheit = !state.useFahrenheit;
+        renderTemperature();
+      });
+      document.getElementById('share-btn').addEventListener('click', shareCard);
+      document.getElementById('sound-btn').addEventListener('click', () => {
+        state.soundEnabled = !state.soundEnabled;
+        document.getElementById('sound-btn').classList.toggle('muted', !state.soundEnabled);
+        updateSound();
+      });
+
+      /* Gyroscope parallax — mobile only, subtle depth effect on tilt */
+      (function setupParallax() {
+        if (typeof window.DeviceOrientationEvent === 'undefined') return;
+
+        let targetX = 0, targetY = 0, curX = 0, curY = 0;
+        let rafId = null, lastEvent = 0;
+
+        function loop() {
+          curX += (targetX - curX) * 0.08;
+          curY += (targetY - curY) * 0.08;
+          const bg = document.getElementById('painting-bg');
+          if (bg) bg.style.transform = `translate3d(${curX.toFixed(1)}px,${curY.toFixed(1)}px,0)`;
+          rafId = (Date.now() - lastEvent < 3000) ? requestAnimationFrame(loop) : null;
+        }
+
+        function onTilt(e) {
+          if (e.gamma === null || e.beta === null) return;
+          lastEvent = Date.now();
+          if (!rafId) rafId = requestAnimationFrame(loop);
+          const gx = Math.max(-25, Math.min(25, e.gamma));
+          const by = Math.max(-20, Math.min(20, (e.beta - 90)));
+          /* Negate for depth illusion: tilt left → painting shifts right */
+          targetX = -(gx / 25) * 8;
+          targetY = -(by / 20) * 6;
+        }
+
+        function start() {
+          window.addEventListener('deviceorientation', onTilt, { passive: true });
+        }
+
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+          /* iOS 13+ — must request inside a user gesture */
+          document.addEventListener('touchstart', function ask() {
+            DeviceOrientationEvent.requestPermission()
+              .then(r => { if (r === 'granted') start(); })
+              .catch(() => {});
+          }, { once: true, passive: true });
+        } else {
+          start();
+        }
+      })();
+    });
+  </script>
+</body>
+</html>
